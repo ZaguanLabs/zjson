@@ -4,8 +4,7 @@
 _zjson_parse_pointer() {
   emulate -L zsh
   local pointer="$1" tail="" part="" REPLY="" slash='/' tilde='~'
-  _zjson_utf8_text "$pointer"
-  if (( _zjson_utf8_error )); then
+  if ! _zjson_utf8_validate "$pointer"; then
     _zjson_fail pointer_syntax "JSON Pointer must be UTF-8" 0 2
     return 2
   fi

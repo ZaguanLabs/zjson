@@ -1,0 +1,46 @@
+name: Zsh compatibility
+
+on:
+  push:
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: '5.8'
+            url: https://www.zsh.org/pub/old/zsh-5.8.tar.xz
+            sha256: dcc4b54cc5565670a65581760261c163d720991f0d06486da61f8d839b52de27
+          - version: '5.9.2'
+            url: https://www.zsh.org/pub/zsh-5.9.2.tar.xz
+            sha256: 36fa734374b44783582cec09bcd67822e2f992c779ec1624ab5596df078d2f81
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Provision the test interpreter
+        env:
+          ZSH_TEST_VERSION: ${{ matrix.version }}
+          ZSH_TEST_URL: ${{ matrix.url }}
+          ZSH_TEST_SHA256: ${{ matrix.sha256 }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential libncurses-dev
+          curl --fail --location --retry 3 "$ZSH_TEST_URL" --output "$RUNNER_TEMP/zsh.tar.xz"
+          printf '%s  %s\n' "$ZSH_TEST_SHA256" "$RUNNER_TEMP/zsh.tar.xz" | sha256sum --check -
+          tar -xJf "$RUNNER_TEMP/zsh.tar.xz" -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/zsh-$ZSH_TEST_VERSION"
+          ./configure --prefix="$RUNNER_TEMP/zsh-install" --enable-multibyte
+          make -j2
+          make install.bin install.modules
+      - name: Syntax and PATH-empty suite in C and C.UTF-8
+        run: |
+          "$RUNNER_TEMP/zsh-install/bin/zsh" -df tests/matrix.zsh "$RUNNER_TEMP/zsh-install/bin/zsh"

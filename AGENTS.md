@@ -4,6 +4,8 @@
   external executables, third-party modules, package managers, or a build step
   as dependencies. Development inspection tools are fine.
 - Use the `zsh-expert` skill for Zsh implementation and review.
+- Support Zsh 5.8 and newer. Run `tests/matrix.zsh` with available supported
+  interpreters for release work; CI covers 5.8 and 5.9.2 in C and C.UTF-8 locales.
 - Source `zjson.zsh` as the public entry point. Keep application-specific codecs
   outside the generic library.
 - Preserve caller options, aliases, locale, and unrelated variables. Treat JSON

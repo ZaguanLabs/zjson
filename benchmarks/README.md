@@ -63,3 +63,54 @@ this optimization addresses that specific repeated search.
 Complete distributions and the remaining workloads are in
 [before.tsv](results/2026-09-12-before.tsv) and
 [after.tsv](results/2026-09-12-after.tsv).
+
+## Unicode and embedding review, 2026-09-12
+
+The integration review identified strict UTF-8 validation and Unicode escape
+decoding as expensive paths. Successful validation now avoids constructing a
+repaired copy. An active UTF-8 locale uses Zsh's native multibyte validity
+classes plus a Unicode upper-bound check; C and other locales use byte-pattern
+validation. Malformed input still reaches the established scanner for exact
+error offsets and repair semantics. Strict validation remains mandatory.
+
+Escaped Unicode uses a constant byte lookup table for locale-independent
+encoding and a per-string code-point cache. After 256 distinct entries, the
+cache is disabled to avoid repeated failed lookups on varied text. The
+comparison includes a varied-escape workload to exercise this case.
+
+Seven rounds of separate processes, alternating implementation order, pinned
+to CPU 2, Zsh 5.9.2, Linux x86-64, C.UTF-8. Each workload has one warm-up and then
+two or five timed iterations per process. Values below are medians of the seven
+process averages, in milliseconds. The original parser is zcoder `ec78880`;
+the zjson release is `3067829` (0.1.0). Reference source was copied into temporary
+directories without compiled wordcode, and each process used the same runner.
+
+| Workload | Original zcoder | zjson 0.1.0 | Updated zjson | Speedup vs 0.1.0 |
+| --- | ---: | ---: | ---: | ---: |
+| ASCII string, 100 KB | 16.228 | 16.488 | 16.605 | 0.99× |
+| 4,000 short strings | 770.115 | 354.414 | 358.838 | 0.99× |
+| 25,000 Unicode code points, 75 KB | 7.755 | 44.748 | 15.364 | 2.91× |
+| Quote the same Unicode text | 41.950 | 38.476 | 9.652 | 3.99× |
+| 2,000 repeated `\u00e9` escapes | 60.986 | 85.790 | 45.910 | 1.87× |
+| 2,000 distinct Unicode escapes | 60.893 | 87.397 | 76.056 | 1.15× |
+
+ASCII and dense-string medians changed by about 1% in this run. Raw Unicode
+parsing remains slower than the original parser, which does not perform strict
+input UTF-8 validation and uses a character array instead of zjson's byte array.
+The results establish improvements against zjson's previous correctness
+contract; they do not equate the validation work of the two parsers.
+
+All 126 measurements are in [unicode.tsv](results/2026-09-12-unicode.tsv).
+The standalone comparison runner uses only Zsh:
+
+```sh
+zsh -f benchmarks/compare.zsh /path/to/zjson/zjson.zsh zjson
+zsh -f benchmarks/compare.zsh /path/to/original/lib/json.zsh json
+```
+
+The trusted entry file must provide `PREFIX_begin`, `PREFIX_discard_value`,
+`PREFIX_quote`, and `PREFIX_TOKEN_TYPE` (uppercase variable prefix). The accepted
+function prefixes are `json` and `zjson`. No application checkout is needed for
+normal tests or benchmarks; an original parser is supplied only for an explicit
+comparison. CPU pinning in the recorded experiment was provided by the external
+measurement driver, outside the pure Zsh runner.

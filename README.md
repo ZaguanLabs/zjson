@@ -8,8 +8,9 @@ required. The library uses Zsh builtins and parameter expansion only.
 
 This is the first standalone extraction of the JSON core from
 [`zcoder.zsh`](docs/origin.md), with a new `zjson_` API. Version 0.1.0 is an initial
-development release; the API may evolve. The compatibility target is Zsh 5.9+;
-currently tested on Zsh 5.9.2 on Linux.
+development release; the API may evolve. **Zsh 5.8 and newer are supported.**
+The release test matrix runs actual Zsh 5.8 and 5.9.2 on Linux, in both C and
+C.UTF-8 locales, with the correctness suite's command path empty.
 
 ## Quick start
 
@@ -47,6 +48,7 @@ Run the self-contained example with `zsh -f examples/basic.zsh`.
 | --- | --- |
 | `zjson_validate "$json"` | Validate exactly one complete JSON value. |
 | `zjson_quote "$text"` | Encode a string, including surrounding quotes, into `REPLY`. |
+| `zjson_utf8_repair "$text"` | Return repaired, unquoted UTF-8 in `REPLY`, preserving parser state and diagnostics. |
 | `zjson_parse_object "$json"` | Populate `ZJSON_OBJECT` and `ZJSON_OBJECT_TYPES`. |
 | `zjson_parse_array "$json"` | Populate `ZJSON_ARRAY` and `ZJSON_ARRAY_TYPES`. |
 | `zjson_get "$json" "$pointer"` | Resolve a JSON Pointer into `REPLY` and `ZJSON_TYPE`. |
@@ -56,6 +58,7 @@ Run the self-contained example with `zsh -f examples/basic.zsh`.
 | `zjson_skip_value` | Alias function for `zjson_discard_value`. |
 | `zjson_capture_raw_value` | Consume a value and put its original JSON text in `REPLY`. |
 | `zjson_capture_value` | Consume a value and put compact, re-encoded JSON in `REPLY`. |
+| `zjson_with_context callback args...` | Run a callback in the same shell and restore the outer tokenizer and diagnostics. |
 
 Whole-document functions and `zjson_quote` take exactly one argument, except
 `zjson_get`, which takes JSON and a Pointer. Status is `0` for success, `1` for
@@ -64,6 +67,9 @@ Pointer syntax and `3` when a valid Pointer cannot resolve a value.
 `ZJSON_ERROR` contains a diagnostic on failure. Object/array results and lookup
 results are published only after the entire document succeeds; their respective
 outputs are cleared on failure.
+`zjson_utf8_repair` returns 0 even when it repairs malformed bytes, or 2 for
+incorrect argument count; it preserves diagnostics in either case.
+`zjson_with_context` returns its callback's status, or 2 if no callback is given.
 
 ### Values and types
 
@@ -131,6 +137,31 @@ lookup failed. Line and column are computed only on failure. New document or
 quote operations reset diagnostics; advancing a failed tokenizer preserves them.
 See [diagnostic codes](docs/diagnostics.md) for the complete contract.
 
+### Embedding and text repair
+
+`zjson_utf8_repair "$text"` is useful for pasted text and cached response bodies.
+It preserves valid bytes, including NUL, and replaces malformed UTF-8 prefixes
+with U+FFFD while retaining later valid characters. Its output is unquoted.
+Only `REPLY` changes; tokenizer state and active diagnostics are preserved.
+
+Use `zjson_with_context` when an operation needs to parse unrelated JSON while
+an outer tokenizer is active:
+
+```zsh
+zjson_begin '[1,2]'
+zjson_next                                  # outer token: 1
+zjson_with_context zjson_get '{"name":"inner"}' /name
+print -r -- "$REPLY"                        # inner
+zjson_next                                  # outer token: comma
+```
+
+The callback runs in the same shell. Source, byte array, cursor, current token,
+diagnostics, and parser scratch state are restored on return or error unwinding.
+`REPLY`, `ZJSON_TYPE`, and object/array decoder results remain callback outputs.
+Application variable updates also remain visible. Nested scopes are supported;
+state copying occurs only at these explicit boundaries. See the full
+[embedding contract](docs/embedding.md).
+
 ### Token access
 
 `ZJSON_TOKEN_TYPE` contains a value type, punctuation (`{ } [ ] : ,`), or `eof`.
@@ -151,6 +182,9 @@ strings; it is not a canonicalization algorithm.
 - Unicode escapes decode to UTF-8 in both UTF-8 and C locales. Paired UTF-16
   surrogates decode together; unpaired surrogates become U+FFFD, preserving the
   original parser's recovery policy.
+- Strict input validation uses native multibyte character classes when an active
+  UTF-8 locale is available, with explicit rejection above U+10FFFF. Other
+  locales use a byte grammar. Both paths enforce the same encoding rules.
 - String encoding replaces malformed UTF-8 prefixes with U+FFFD and escapes all
   JSON control characters. It is a text encoder, not a lossless binary codec.
 - Zsh scalars can retain NUL; the library preserves it through `\u0000`. External
@@ -161,7 +195,8 @@ strings; it is not a canonicalization algorithm.
 - There is one shared tokenizer state. Calls preserve shell options and locale,
   but replace the documented `ZJSON_*` results. Reserve `ZJSON_*`, `zjson_*`, and
   `_zjson_*` names for the library. `REPLY` follows Zsh's caller-local output
-  convention. This is not a reentrant or incremental parser.
+  convention. Use `zjson_with_context` for nested operations. The tokenizer is
+  not incremental, and simultaneous independent parser objects are not provided.
 
 ## Development
 
@@ -171,6 +206,7 @@ LC_ALL=C zsh -f tests/run.zsh
 zsh -f -n zjson.zsh
 zsh -f -n lib/zjson.zsh
 zsh -f -n lib/pointer.zsh
+zsh -f tests/matrix.zsh /path/to/zsh-5.8 /path/to/zsh-5.9.2
 zsh -f benchmarks/run.zsh 5
 ```
 
@@ -180,5 +216,9 @@ control characters, Unicode and malformed UTF-8, exact source capture, nesting
 limits, shell metacharacters, and caller option/alias isolation.
 Pointer examples, diagnostic locations, and deterministic mixed-escape strings
 extend the same dependency-free suite. See [benchmark methodology and results](benchmarks/README.md).
+The [CI workflow](.github/workflows/test.yml) provisions versioned Zsh
+interpreters and runs the matrix on pushes, pull requests, and releases.
+Provisioning the test interpreters uses the runner's build tools; installing or
+using zjson itself requires no compilation. See [compatibility testing](docs/compatibility.md).
 
 Licensed under [Apache-2.0](LICENSE). See [origin and extraction notes](docs/origin.md).

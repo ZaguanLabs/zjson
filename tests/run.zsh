@@ -196,5 +196,7 @@ source "$TEST_ROOT/tests/utf8.zsh" || exit 1
 source "$TEST_ROOT/tests/diagnostics.zsh" || exit 1
 source "$TEST_ROOT/tests/pointer.zsh" || exit 1
 source "$TEST_ROOT/tests/scanner.zsh" || exit 1
+source "$TEST_ROOT/tests/utf8_api.zsh" || exit 1
+source "$TEST_ROOT/tests/context.zsh" || exit 1
 print -r -- "$checks checks, $failures failures (external command path empty)"
 (( failures == 0 ))

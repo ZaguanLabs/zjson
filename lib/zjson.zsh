@@ -9,7 +9,6 @@ typeset -gA ZJSON_OBJECT=() ZJSON_OBJECT_TYPES=()
 typeset -gi ZJSON_POS=1 ZJSON_LEN=0 ZJSON_TOKEN_START=1
 typeset -g ZJSON_ERROR_CODE="" ZJSON_TYPE=""
 typeset -gi ZJSON_ERROR_OFFSET=0 ZJSON_ERROR_LINE=0 ZJSON_ERROR_COLUMN=0
-typeset -gi _zjson_utf8_error=0
 
 # Called only on failure. Locations are 1-based bytes; LF starts a new line.
 # Offset zero denotes a usage/pointer error without a JSON source location.
@@ -47,29 +46,6 @@ _zjson_control_error() {
     "${ZJSON_CHARS[(ib:ZJSON_POS:)$pattern]}"
 }
 
-# Encode a validated Unicode scalar directly as UTF-8 bytes. printf's Unicode
-# escapes depend on LC_CTYPE; octal byte escapes do not.
-_zjson_codepoint_utf8() {
-  emulate -L zsh
-  local -i cp=$1 byte
-  local -a bytes=()
-  local encoded="" piece=""
-  if (( cp < 0x80 )); then
-    bytes=( $cp )
-  elif (( cp < 0x800 )); then
-    bytes=( $((0xC0 | (cp >> 6))) $((0x80 | (cp & 63))) )
-  elif (( cp < 0x10000 )); then
-    bytes=( $((0xE0 | (cp >> 12))) $((0x80 | ((cp >> 6) & 63))) $((0x80 | (cp & 63))) )
-  else
-    bytes=( $((0xF0 | (cp >> 18))) $((0x80 | ((cp >> 12) & 63))) $((0x80 | ((cp >> 6) & 63))) $((0x80 | (cp & 63))) )
-  fi
-  for byte in "${bytes[@]}"; do
-    printf -v piece '\\0%03o' "$byte"
-    encoded+="$piece"
-  done
-  printf -v REPLY '%b' "$encoded"
-}
-
 # Escape the remaining JSON controls with at most 32 native split/join passes.
 # Dynamic delimiters preserve empty fields; no scalar character indexing or
 # per-match string replacement is needed even for control-heavy Unicode text.
@@ -86,73 +62,6 @@ _zjson_quote_controls() {
     output="${(pj:$escaped:)${(@ps:$ch:)output}}"
   done
   REPLY="$output"
-}
-
-# Repair malformed UTF-8 at the JSON boundary, including bytes in old saved
-# transcripts. Work in bytes regardless of the process locale. Valid text is
-# copied in bounded blocks: an unbounded repeated glob can exhaust Zsh's stack.
-_zjson_utf8_text() {
-  emulate -L zsh
-  setopt extendedglob nomultibyte
-  local LC_ALL=C
-  local input="$1" chunk='' byte='' second='' replacement=$'\xef\xbf\xbd'
-  local unit=$'([\x00-\x7f]|[\xc2-\xdf][\x80-\xbf]|\xe0[\xa0-\xbf][\x80-\xbf]|[\xe1-\xec\xee-\xef][\x80-\xbf][\x80-\xbf]|\xed[\x80-\x9f][\x80-\xbf]|\xf0[\x90-\xbf][\x80-\xbf][\x80-\xbf]|[\xf1-\xf3][\x80-\xbf][\x80-\xbf][\x80-\xbf]|\xf4[\x80-\x8f][\x80-\xbf][\x80-\xbf])'
-  local -a pieces=() bytes=()
-  local -i offset=1 end length=${#input} i j width count extra
-  _zjson_utf8_error=0
-  if [[ "$input" != *[$'\x80'-$'\xff']* ]]; then
-    REPLY="$input"
-    return 0
-  fi
-  while (( offset <= length )); do
-    end=$(( offset + 1023 ))
-    (( end > length )) && end=$length
-    # Include continuation bytes when a valid character crosses a block edge.
-    for extra in 1 2 3; do
-      (( end < length )) || break
-      [[ ${input[end+1]} == [$'\x80'-$'\xbf'] ]] || break
-      (( end++ ))
-    done
-    chunk="${input[offset,end]}"
-    if [[ "$chunk" == (${~unit})# ]]; then
-      pieces+=("$chunk")
-    else
-      bytes=("${(@s::)chunk}")
-      count=${#bytes}
-      for (( i=1; i<=count; )); do
-        byte=${bytes[i]}
-        width=1
-        second=$'[\x80-\xbf]'
-        case "$byte" in
-          [$'\x00'-$'\x7f']) pieces+=("$byte"); (( i++ )); continue ;;
-          [$'\xc2'-$'\xdf']) width=2 ;;
-          $'\xe0') width=3; second=$'[\xa0-\xbf]' ;;
-          [$'\xe1'-$'\xec']|[$'\xee'-$'\xef']) width=3 ;;
-          $'\xed') width=3; second=$'[\x80-\x9f]' ;;
-          $'\xf0') width=4; second=$'[\x90-\xbf]' ;;
-          [$'\xf1'-$'\xf3']) width=4 ;;
-          $'\xf4') width=4; second=$'[\x80-\x8f]' ;;
-        esac
-        j=$(( i + 1 ))
-        if (( width > 1 && j <= count )) && [[ ${bytes[j]} == ${~second} ]]; then
-          (( j++ ))
-          while (( j < i + width && j <= count )) && [[ ${bytes[j]} == [$'\x80'-$'\xbf'] ]]; do
-            (( j++ ))
-          done
-        fi
-        if (( width > 1 && j == i + width )); then
-          pieces+=("${(j::)bytes[i,j-1]}")
-        else
-          # Consume only the malformed prefix; retain the following character.
-          (( _zjson_utf8_error )) || _zjson_utf8_error=$(( offset + i - 1 ))
-          pieces+=("$replacement")
-        fi
-        i=$j
-      done
-    fi
-    offset=$(( end + 1 ))
-  done
-  REPLY="${(j::)pieces}"
 }
 
 zjson_quote() {
@@ -206,8 +115,7 @@ zjson_begin() {
   (( $# == 1 )) || { _zjson_fail usage "expected one JSON argument" 0 2; return 2; }
   local REPLY=""
   ZJSON_SOURCE="$1"
-  _zjson_utf8_text "$1"
-  (( _zjson_utf8_error == 0 )) || { _zjson_fail invalid_utf8 "invalid UTF-8 in JSON input" "$_zjson_utf8_error"; return 1; }
+  _zjson_utf8_validate "$1" || { _zjson_fail invalid_utf8 "invalid UTF-8 in JSON input" "$_zjson_utf8_error"; return 1; }
   # Tokenize over a byte array: Zsh scalar subscripting with multibyte enabled
   # walks the string from its start on every access. Array indexing and pattern
   # searches over the array run at C speed.
@@ -298,6 +206,11 @@ _zjson_scan_string_slow() {
   emulate -L zsh
   setopt nomultibyte
   local REPLY=""
+  # Repeated escapes are common in ASCII-serialized Unicode text. Keep a small
+  # per-string cache; disable it after 256 distinct code points so high-diversity
+  # text does not keep paying for unsuccessful associative lookups.
+  local -A codepoints=()
+  local -i cache_active=1
   local ch="" esc="" hex="" low_hex="" decoded="" value="" run=""
   local -i cp low_cp boundary
   while (( ZJSON_POS <= ZJSON_LEN )); do
@@ -352,8 +265,20 @@ _zjson_scan_string_slow() {
           # printf %b is a fatal error that would abort the whole process.
           cp=0xFFFD
         fi
-        _zjson_codepoint_utf8 "$cp"
-        decoded="$REPLY"
+        if (( cache_active )) && (( ${+codepoints[$cp]} )); then
+          decoded="${codepoints[$cp]}"
+        else
+          _zjson_codepoint_utf8 "$cp"
+          decoded="$REPLY"
+          if (( cache_active )); then
+            if (( ${#codepoints} < 256 )); then
+              codepoints[$cp]="$decoded"
+            else
+              cache_active=0
+              codepoints=()
+            fi
+          fi
+        fi
         value+="$decoded"
         ;;
       *) _zjson_fail invalid_escape "invalid JSON escape" "$(( ZJSON_POS - 1 ))"; return 1 ;;
