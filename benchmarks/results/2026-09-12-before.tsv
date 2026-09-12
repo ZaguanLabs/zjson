@@ -1,0 +1,20 @@
+# zjson=0.1.0 zsh=5.9.2 platform=linux-gnu/x86_64 locale=C.UTF-8 PATH=empty
+# label=original-scanner
+case	operation	bytes	samples	min_ms	median_ms	max_ms
+numbers-1000	zjson_validate	2001	5	51.342	51.654	53.104
+strings-1000	zjson_validate	4001	5	97.005	97.263	99.232
+numbers-2000	zjson_validate	4001	5	106.698	107.016	107.531
+strings-2000	zjson_validate	8001	5	267.136	268.930	273.082
+numbers-4000	zjson_validate	8001	5	238.423	239.803	259.705
+strings-4000	zjson_validate	16001	5	804.942	812.762	831.582
+ascii-100k	zjson_validate	100002	5	16.989	17.306	18.367
+ascii-100k	zjson_quote	100000	5	7.926	7.966	7.992
+unicode-25k	zjson_validate	75002	5	45.255	45.414	45.612
+unicode-25k	zjson_quote	75000	5	38.627	38.765	38.805
+unicode-escapes	zjson_validate	12002	5	84.822	85.162	85.640
+simple-escapes	zjson_validate	12002	5	15.671	15.779	15.810
+nested-64	zjson_validate	129	5	3.148	3.163	3.188
+envelope	zjson_parse_object	2036	5	51.409	51.692	52.459
+envelope	bench_raw	2036	5	51.698	51.780	52.121
+envelope	bench_compact	2036	5	55.477	55.486	55.646
+envelope	zjson_get	2036	5	52.980	53.291	53.651
