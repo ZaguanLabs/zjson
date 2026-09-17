@@ -22,6 +22,8 @@ Workloads cover increasing numbers of short strings and numbers, long ASCII and
 UTF-8 strings, Unicode escapes, simple escapes, nested containers, object
 decoding, raw capture, compact capture, and Pointer lookup. Escape-heavy fixtures
 also check their decoded values before timing.
+The 2026-09-17 run also measures object iteration, two-Pointer multi-get, and
+encoding an already decoded object.
 
 These are warm, in-process measurements. They measure neither startup time nor
 peak memory use. CPU load, Zsh version, and hardware affect the results; compare
@@ -114,3 +116,30 @@ function prefixes are `json` and `zjson`. No application checkout is needed for
 normal tests or benchmarks; an original parser is supplied only for an explicit
 comparison. CPU pinning in the recorded experiment was provided by the external
 measurement driver, outside the pure Zsh runner.
+
+## Correctness and API additions, 2026-09-17
+
+Nine samples, Zsh 5.9.2, Linux x86_64, C.UTF-8, on the same local machine. The
+full distribution is in
+[correctness-and-apis.tsv](results/2026-09-17-correctness-and-apis.tsv).
+
+| Workload | Median |
+| --- | ---: |
+| 4,000 numbers, validation | 230.706 ms |
+| 4,000 short strings, validation | 348.417 ms |
+| Envelope, object decode | 52.586 ms |
+| Envelope, object callback iteration | 52.375 ms |
+| Envelope, two-Pointer multi-get | 59.231 ms |
+| Envelope, encode decoded object | 52.987 ms |
+
+The recorded 2026-09-12 five-sample medians for 4,000 numbers and strings were
+238.109 ms and 356.766 ms. These runs are not a controlled alternating A/B
+experiment, but the direction is consistent with removing redundant private
+`emulate` scopes on scanner helpers. Compact capture remains close to its
+previous cost on the small envelope while now joining an array of parts, which
+avoids repeated full-output concatenation on large containers.
+
+The full byte-array representation was retained, so no peak-memory column was
+added. Successful whole-document operations now clear `ZJSON_CHARS` at EOF, but
+Zsh has no portable per-operation peak-RSS primitive. Token APIs intentionally
+retain the array until the next `zjson_begin`.

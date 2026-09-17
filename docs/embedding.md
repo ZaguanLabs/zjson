@@ -60,8 +60,10 @@ start unrelated parsing with a whole-document API or `zjson_begin` as usual.
 The following remain callback outputs after the scope exits:
 
 - `REPLY` and `ZJSON_TYPE`;
-- `ZJSON_OBJECT` and `ZJSON_OBJECT_TYPES`;
+- `ZJSON_OBJECT`, `ZJSON_OBJECT_TYPES`, `ZJSON_OBJECT_KEYS`, and
+  `ZJSON_OBJECT_DUPLICATE_KEYS`;
 - `ZJSON_ARRAY` and `ZJSON_ARRAY_TYPES`;
+- `ZJSON_RESULTS` and `ZJSON_TYPES` from multi-Pointer lookup;
 - application variables and other intentional callback side effects.
 
 If an application needs to retain inner diagnostics, copy them to application
@@ -71,4 +73,6 @@ its own enclosing function.
 
 Copying the outer byte array costs memory and time proportional to its size.
 That cost occurs at explicit context boundaries, with no snapshot work added to
-normal token advancement. This API is intended for nested synchronous parsing.
+normal token advancement. A nested whole-document operation may clear its local
+copy of `ZJSON_CHARS` after EOF; scope exit still restores the outer tokenizer's
+byte array. This API is intended for nested synchronous parsing.

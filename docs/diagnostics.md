@@ -38,11 +38,18 @@ location applies.
 | `pointer_type` | 3 | Attempt to descend into a scalar; scalar token. |
 | `pointer_ambiguous` | 3 | Referenced member occurs more than once; containing object. |
 
+`usage` also covers encoder type/result mismatches, such as an unknown type tag,
+`true` value text paired with a `false` type, or inconsistent array and type
+lengths. Invalid nested JSON supplied to an encoder uses the normal JSON status
+of `1` and the corresponding JSON diagnostic code.
+
 Tokenization errors take precedence over grammar checks that require that token.
 For example, `{x:1}` reports `unexpected_character`, while `{1:1}` reports
 `expected_key`. An unterminated string may report EOF before inspecting controls
 in its final run. Diagnostic positions describe the detected error, not a
 guarantee to identify the earliest possible error in a multiply malformed input.
+Tokenization itself does not reject `}` or `]` after a comma; value-consuming
+functions report `trailing_comma` at that closing token.
 
 Lookup checks Pointer syntax first. Once JSON parsing starts, the complete
 document must be valid before a result or resolution error is returned. A match,
@@ -52,3 +59,13 @@ New operations reset diagnostics. Low-level tokenizer calls following a failure
 return nonzero and preserve the diagnostic until another operation starts.
 Existing object decoding continues to use the last duplicate key; Pointer
 lookup rejects a duplicate only when that member is part of the requested path.
+`zjson_get_multi` reports the first unresolved Pointer in argument order after
+the complete document is valid. Its result arrays are cleared on any status `3`.
+
+Iteration APIs return a nonzero callback status unchanged and do not replace an
+already successful parser diagnostic with a callback error. Parser failures use
+their normal diagnostic contract.
+
+Successful whole-document operations release `ZJSON_CHARS` after EOF. This does
+not change diagnostics or `ZJSON_SOURCE`, but the shared tokenizer must be
+reinitialized before another token operation.

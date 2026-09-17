@@ -7,5 +7,6 @@
   builtin source "${${(%):-%x}:A:h}/lib/utf8.zsh" || return
   builtin source "${${(%):-%x}:A:h}/lib/zjson.zsh" || return
   builtin source "${${(%):-%x}:A:h}/lib/pointer.zsh" || return
+  builtin source "${${(%):-%x}:A:h}/lib/encode.zsh" || return
   builtin source "${${(%):-%x}:A:h}/lib/context.zsh"
 }

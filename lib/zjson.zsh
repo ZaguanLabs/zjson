@@ -2,9 +2,9 @@
 # Extracted and adapted from zcoder.zsh/lib/json.zsh; see docs/origin.md.
 # Internal implementation. Source ../zjson.zsh for option-safe loading.
 
-typeset -g ZJSON_VERSION=0.1.0
+typeset -g ZJSON_VERSION=0.2.0
 typeset -g ZJSON_SOURCE="" ZJSON_TOKEN_TYPE="" ZJSON_TOKEN_VALUE="" ZJSON_ERROR=""
-typeset -ga ZJSON_CHARS=() ZJSON_ARRAY=() ZJSON_ARRAY_TYPES=()
+typeset -ga ZJSON_CHARS=() ZJSON_ARRAY=() ZJSON_ARRAY_TYPES=() ZJSON_OBJECT_KEYS=() ZJSON_OBJECT_DUPLICATE_KEYS=()
 typeset -gA ZJSON_OBJECT=() ZJSON_OBJECT_TYPES=()
 typeset -gi ZJSON_POS=1 ZJSON_LEN=0 ZJSON_TOKEN_START=1
 typeset -g ZJSON_ERROR_CODE="" ZJSON_TYPE=""
@@ -39,8 +39,6 @@ _zjson_fail() {
 }
 
 _zjson_control_error() {
-  emulate -L zsh
-  setopt nomultibyte
   local pattern=$'[\0-\37]'
   _zjson_fail unescaped_control "unescaped JSON control character" \
     "${ZJSON_CHARS[(ib:ZJSON_POS:)$pattern]}"
@@ -50,8 +48,6 @@ _zjson_control_error() {
 # Dynamic delimiters preserve empty fields; no scalar character indexing or
 # per-match string replacement is needed even for control-heavy Unicode text.
 _zjson_quote_controls() {
-  emulate -L zsh
-  setopt nomultibyte
   local output="$1" ch="" encoded="" escaped=""
   local -i code
   for (( code=0; code<32; code++ )); do
@@ -138,8 +134,6 @@ zjson_begin() {
 # invalid escapes, unterminated input — falls back to the exact
 # character-by-character scanner so every error and edge case is unchanged.
 _zjson_scan_string() {
-  emulate -L zsh
-  setopt nomultibyte
   local raw="" part="" quote_char='"'
   local -a parts=() decoded_parts=()
   local -i quote before
@@ -203,8 +197,6 @@ _zjson_scan_string() {
 }
 
 _zjson_scan_string_slow() {
-  emulate -L zsh
-  setopt nomultibyte
   local REPLY=""
   # Repeated escapes are common in ASCII-serialized Unicode text. Keep a small
   # per-string cache; disable it after 256 distinct code points so high-diversity
@@ -291,7 +283,7 @@ _zjson_scan_string_slow() {
 zjson_next() {
   emulate -L zsh
   setopt nomultibyte
-  local ch="" value="" previous="$ZJSON_TOKEN_TYPE" whitespace=$' \t\r\n'
+  local ch="" value="" whitespace=$' \t\r\n'
   local -i boundary
   setopt extendedglob
 
@@ -307,10 +299,6 @@ zjson_next() {
   fi
 
   ch="${ZJSON_CHARS[ZJSON_POS]}"
-  if [[ "$previous" == ',' && ( "$ch" == '}' || "$ch" == ']' ) ]]; then
-    _zjson_fail trailing_comma "trailing comma in JSON container"
-    return 1
-  fi
   case "$ch" in
     '{'|'}'|'['|']'|':'|',')
       ZJSON_TOKEN_TYPE="$ch"
@@ -366,6 +354,7 @@ zjson_discard_value() {
         zjson_discard_value || return 1
         if [[ "$ZJSON_TOKEN_TYPE" == ',' ]]; then
           zjson_next || return 1
+          [[ "$ZJSON_TOKEN_TYPE" != ']' ]] || { _zjson_fail trailing_comma "trailing comma in JSON container"; return 1; }
         elif [[ "$ZJSON_TOKEN_TYPE" != ']' ]]; then
           _zjson_fail expected_array_separator "expected comma or closing bracket"
           return 1
@@ -383,6 +372,7 @@ zjson_discard_value() {
         zjson_discard_value || return 1
         if [[ "$ZJSON_TOKEN_TYPE" == ',' ]]; then
           zjson_next || return 1
+          [[ "$ZJSON_TOKEN_TYPE" != '}' ]] || { _zjson_fail trailing_comma "trailing comma in JSON container"; return 1; }
         elif [[ "$ZJSON_TOKEN_TYPE" != '}' ]]; then
           _zjson_fail expected_object_separator "expected comma or closing brace"
           return 1
@@ -406,7 +396,7 @@ zjson_capture_raw_value() {
   local -i start=$ZJSON_TOKEN_START end=0
   zjson_discard_value || return 1
   end=$(( ZJSON_TOKEN_START - 1 ))
-  while (( end >= start )) && [[ "${ZJSON_CHARS[end]}" == [[:space:]] ]]; do (( end-- )); done
+  while (( end >= start )) && [[ "${ZJSON_CHARS[end]}" == [$' \t\r\n'] ]]; do (( end-- )); done
   (( end >= start )) && REPLY="${(j::)ZJSON_CHARS[start,end]}" || REPLY=""
 }
 
@@ -420,36 +410,39 @@ zjson_capture_value() {
   if [[ "$ZJSON_TOKEN_TYPE" == '[' || "$ZJSON_TOKEN_TYPE" == '{' ]]; then
     (( ++_zjson_depth <= 128 )) || { _zjson_fail nesting_limit "JSON nesting exceeds 128 containers"; return 1; }
   fi
-  local output="" item="" key="" comma=""
+  local item="" key="" comma=""
+  local -a output=()
   case "$ZJSON_TOKEN_TYPE" in
     string)
-      zjson_quote "$ZJSON_TOKEN_VALUE"; output="$REPLY"
+      zjson_quote "$ZJSON_TOKEN_VALUE"
+      output=("$REPLY")
       zjson_next || return 1
       ;;
     number|true|false|null)
-      output="$ZJSON_TOKEN_VALUE"
+      output=("$ZJSON_TOKEN_VALUE")
       zjson_next || return 1
       ;;
     '[')
-      output="["
+      output=("[")
       zjson_next || return 1
       while [[ "$ZJSON_TOKEN_TYPE" != ']' ]]; do
         zjson_capture_value || return 1
         item="$REPLY"
-        output+="${comma}${item}"
+        output+=("${comma}${item}")
         comma=","
         if [[ "$ZJSON_TOKEN_TYPE" == ',' ]]; then
           zjson_next || return 1
+          [[ "$ZJSON_TOKEN_TYPE" != ']' ]] || { _zjson_fail trailing_comma "trailing comma in JSON container"; return 1; }
         elif [[ "$ZJSON_TOKEN_TYPE" != ']' ]]; then
           _zjson_fail expected_array_separator "expected comma or closing bracket"
           return 1
         fi
       done
       zjson_next || return 1
-      output+="]"
+      output+=("]")
       ;;
     '{')
-      output="{"
+      output=("{")
       zjson_next || return 1
       while [[ "$ZJSON_TOKEN_TYPE" != '}' ]]; do
         [[ "$ZJSON_TOKEN_TYPE" == string ]] || { _zjson_fail expected_key "expected object key"; return 1; }
@@ -460,21 +453,22 @@ zjson_capture_value() {
         zjson_capture_value || return 1
         item="$REPLY"
         zjson_quote "$key"
-        output+="${comma}${REPLY}:${item}"
+        output+=("${comma}${REPLY}:${item}")
         comma=","
         if [[ "$ZJSON_TOKEN_TYPE" == ',' ]]; then
           zjson_next || return 1
+          [[ "$ZJSON_TOKEN_TYPE" != '}' ]] || { _zjson_fail trailing_comma "trailing comma in JSON container"; return 1; }
         elif [[ "$ZJSON_TOKEN_TYPE" != '}' ]]; then
           _zjson_fail expected_object_separator "expected comma or closing brace"
           return 1
         fi
       done
       zjson_next || return 1
-      output+="}"
+      output+=("}")
       ;;
     *) _zjson_fail expected_value "expected JSON value"; return 1 ;;
   esac
-  REPLY="$output"
+  REPLY="${(j::)output}"
 }
 
 # Callers that skip a member only need the cursor advanced past it; rebuilding
@@ -495,6 +489,9 @@ zjson_validate() {
     _zjson_fail trailing_content "trailing content after JSON value"
     return 1
   }
+  # Whole-document callers cannot continue the tokenizer after EOF. Releasing
+  # the byte array avoids retaining a second full copy of large documents.
+  ZJSON_CHARS=()
 }
 
 # Return decoded scalars or the original source of a container in REPLY.
@@ -514,10 +511,13 @@ _zjson_read_value() {
 zjson_parse_object() {
   emulate -L zsh
   local key="" kind="" REPLY=""
-  local -A values=() kinds=()
+  local -a keys=() duplicates=()
+  local -A values=() kinds=() seen=()
   local -i _zjson_depth=1
   ZJSON_OBJECT=()
   ZJSON_OBJECT_TYPES=()
+  ZJSON_OBJECT_KEYS=()
+  ZJSON_OBJECT_DUPLICATE_KEYS=()
   zjson_begin "$@" || return $?
   [[ "$ZJSON_TOKEN_TYPE" == '{' ]] || { _zjson_fail expected_object "expected JSON object"; return 1; }
   zjson_next || return 1
@@ -529,10 +529,17 @@ zjson_parse_object() {
     zjson_next || return 1
     kind="$ZJSON_TOKEN_TYPE"
     _zjson_read_value || return 1
+    if (( ${+seen[$key]} )); then
+      duplicates+=( "$key" )
+    else
+      seen[$key]=1
+      keys+=( "$key" )
+    fi
     values[$key]="$REPLY"
     kinds[$key]="$kind"
     if [[ "$ZJSON_TOKEN_TYPE" == ',' ]]; then
       zjson_next || return 1
+      [[ "$ZJSON_TOKEN_TYPE" != '}' ]] || { _zjson_fail trailing_comma "trailing comma in JSON container"; return 1; }
     elif [[ "$ZJSON_TOKEN_TYPE" != '}' ]]; then
       _zjson_fail expected_object_separator "expected comma or closing brace"
       return 1
@@ -542,6 +549,9 @@ zjson_parse_object() {
   [[ "$ZJSON_TOKEN_TYPE" == eof ]] || { _zjson_fail trailing_content "trailing content after JSON object"; return 1; }
   ZJSON_OBJECT=( "${(@kv)values}" )
   ZJSON_OBJECT_TYPES=( "${(@kv)kinds}" )
+  ZJSON_OBJECT_KEYS=( "${keys[@]}" )
+  ZJSON_OBJECT_DUPLICATE_KEYS=( "${duplicates[@]}" )
+  ZJSON_CHARS=()
 }
 
 zjson_parse_array() {
@@ -561,6 +571,7 @@ zjson_parse_array() {
     kinds+=( "$kind" )
     if [[ "$ZJSON_TOKEN_TYPE" == ',' ]]; then
       zjson_next || return 1
+      [[ "$ZJSON_TOKEN_TYPE" != ']' ]] || { _zjson_fail trailing_comma "trailing comma in JSON container"; return 1; }
     elif [[ "$ZJSON_TOKEN_TYPE" != ']' ]]; then
       _zjson_fail expected_array_separator "expected comma or closing bracket"
       return 1
@@ -570,4 +581,5 @@ zjson_parse_array() {
   [[ "$ZJSON_TOKEN_TYPE" == eof ]] || { _zjson_fail trailing_content "trailing content after JSON array"; return 1; }
   ZJSON_ARRAY=( "${values[@]}" )
   ZJSON_ARRAY_TYPES=( "${kinds[@]}" )
+  ZJSON_CHARS=()
 }

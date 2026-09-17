@@ -7,7 +7,7 @@ arrays. No jq, Python, external commands, third-party modules, or build step is
 required. The library uses Zsh builtins and parameter expansion only.
 
 This is the first standalone extraction of the JSON core from
-[`zcoder.zsh`](docs/origin.md), with a new `zjson_` API. Version 0.1.0 is an initial
+[`zcoder.zsh`](docs/origin.md), with a new `zjson_` API. Version 0.2.0 is a
 development release; the API may evolve. **Zsh 5.8 and newer are supported.**
 The release test matrix runs actual Zsh 5.8 and 5.9.2 on Linux, in both C and
 C.UTF-8 locales, with the correctness suite's command path empty.
@@ -49,9 +49,16 @@ Run the self-contained example with `zsh -f examples/basic.zsh`.
 | `zjson_validate "$json"` | Validate exactly one complete JSON value. |
 | `zjson_quote "$text"` | Encode a string, including surrounding quotes, into `REPLY`. |
 | `zjson_utf8_repair "$text"` | Return repaired, unquoted UTF-8 in `REPLY`, preserving parser state and diagnostics. |
+| `zjson_parse "$json"` | Return the root in `REPLY` and `ZJSON_TYPE`. |
 | `zjson_parse_object "$json"` | Populate `ZJSON_OBJECT` and `ZJSON_OBJECT_TYPES`. |
 | `zjson_parse_array "$json"` | Populate `ZJSON_ARRAY` and `ZJSON_ARRAY_TYPES`. |
 | `zjson_get "$json" "$pointer"` | Resolve a JSON Pointer into `REPLY` and `ZJSON_TYPE`. |
+| `zjson_get_multi "$json" "$pointer"...` | Resolve multiple Pointers in one pass into `ZJSON_RESULTS` and `ZJSON_TYPES`. |
+| `zjson_each_object "$json" callback args...` | Invoke `callback key value type args...` for each object member. |
+| `zjson_each_array "$json" callback args...` | Invoke `callback index value type args...` for each array element. |
+| `zjson_encode_value "$value" "$type"` | Encode one typed value into `REPLY`. |
+| `zjson_encode_array` | Encode `ZJSON_ARRAY` and `ZJSON_ARRAY_TYPES` into `REPLY`. |
+| `zjson_encode_object` | Encode `ZJSON_OBJECT`, `ZJSON_OBJECT_TYPES`, and `ZJSON_OBJECT_KEYS` into `REPLY`. |
 | `zjson_begin "$json"` | Initialize the tokenizer and read the first token. |
 | `zjson_next` | Advance one token. |
 | `zjson_discard_value` | Validate and consume the value at the current token. |
@@ -60,10 +67,14 @@ Run the self-contained example with `zsh -f examples/basic.zsh`.
 | `zjson_capture_value` | Consume a value and put compact, re-encoded JSON in `REPLY`. |
 | `zjson_with_context callback args...` | Run a callback in the same shell and restore the outer tokenizer and diagnostics. |
 
-Whole-document functions and `zjson_quote` take exactly one argument, except
-`zjson_get`, which takes JSON and a Pointer. Status is `0` for success, `1` for
-invalid JSON, or `2` for incorrect arguments. Lookup also uses `2` for invalid
-Pointer syntax and `3` when a valid Pointer cannot resolve a value.
+Whole-document functions and `zjson_quote` take exactly one argument.
+`zjson_get` takes JSON and one Pointer; `zjson_get_multi` takes JSON and one or
+more Pointers. Iteration functions take JSON, a callback name, and optional
+callback arguments. Encode functions take either a value and type tag or no
+arguments and read their published decoder results. Status is `0` for success,
+`1` for invalid JSON, or `2` for incorrect arguments. Pointer lookup also uses
+`2` for invalid Pointer syntax and `3` when a valid Pointer cannot resolve a
+value.
 `ZJSON_ERROR` contains a diagnostic on failure. Object/array results and lookup
 results are published only after the entire document succeeds; their respective
 outputs are cleared on failure.
@@ -82,9 +93,31 @@ Types are `string`, `number`, `true`, `false`, `null`, `{` (object), and `[` (ar
 This distinguishes `"null"` from `null`, and `"123"` from `123`.
 
 Arrays use native Zsh indexing (starting at 1). Objects support empty keys and
-literal shell metacharacters; duplicate keys use the last value. Associative
-arrays do not preserve object member order. Check key existence with
-`${+ZJSON_OBJECT[key]}` to distinguish a missing key from an empty string.
+literal shell metacharacters; duplicate keys use the last value.
+`ZJSON_OBJECT_KEYS` preserves the first source order of unique keys, while
+`ZJSON_OBJECT_DUPLICATE_KEYS` lists repeated source keys in order. Check key
+existence with `${+ZJSON_OBJECT[key]}` to distinguish a missing key from an empty
+string.
+
+### Encoding
+
+`zjson_encode_value` requires the existing type tags: `string`, `number`,
+`true`, `false`, `null`, `{`, and `[`. Numbers keep their spelling and are never
+converted to arithmetic. String encoding follows the `zjson_quote` policy and
+repairs malformed UTF-8. Container values must already be valid JSON text and
+are retained as source text rather than normalized.
+
+`zjson_encode_array` and `zjson_encode_object` encode the published decoder
+results. Object encoding uses `ZJSON_OBJECT_KEYS` when it matches the decoded
+object, so a round trip retains first-seen source order and last duplicate
+values. Manually constructed objects without that array use Zsh's deterministic
+sorted key expansion.
+
+```zsh
+zjson_parse_object '{"name":"zjson","enabled":true,"ports":[8080,8081]}'
+zjson_encode_object
+print -r -- "$REPLY" # {"name":"zjson","enabled":true,"ports":[8080,8081]}
+```
 
 ### Nested lookup
 
@@ -119,6 +152,31 @@ source text. The result type uses the same vocabulary as the object/array APIs.
 Lookup validates skipped values and requires EOF before publishing results.
 Malformed JSON takes precedence over a missing or ambiguous value. Pointer
 syntax is checked before parsing the document.
+
+`zjson_get_multi` follows the same Pointer syntax and resolution rules. It
+tokenizes and validates the document once, discarding branches that cannot
+match any requested Pointer. Results and types are published in argument order
+only when every Pointer resolves; any resolution failure clears both arrays and
+returns `3`. The diagnostic describes the first unresolved Pointer in argument
+order.
+
+### Iteration
+
+The callback APIs do not build the full object or array result. Object
+callbacks receive `key`, decoded scalar or raw container `value`, and `type`.
+Array callbacks receive the native Zsh `index` (starting at 1), `value`, and
+`type`; optional trailing arguments are passed through. Success requires a
+complete valid document. A nonzero callback status is returned immediately and
+may leave the tokenizer positioned after that member.
+
+```zsh
+show_member() { print -r -- "$1 = $2 ($3)"; }
+zjson_each_object '{"name":"zjson","port":8080}' show_member
+```
+
+Callbacks run through `zjson_with_context`, so they may parse unrelated JSON
+without destroying the outer iteration state. Callback arguments are data and
+are never evaluated.
 
 ### Structured diagnostics
 
@@ -183,15 +241,18 @@ strings; it is not a canonicalization algorithm.
   surrogates decode together; unpaired surrogates become U+FFFD, preserving the
   original parser's recovery policy.
 - Strict input validation uses native multibyte character classes when an active
-  UTF-8 locale is available, with explicit rejection above U+10FFFF. Other
-  locales use a byte grammar. Both paths enforce the same encoding rules.
+  UTF-8 locale is available, plus explicit rejection of overlong encodings,
+  surrogates, and values above U+10FFFF. Other locales use a byte grammar. Both
+  paths enforce the same encoding rules.
 - String encoding replaces malformed UTF-8 prefixes with U+FFFD and escapes all
   JSON control characters. It is a text encoder, not a lossless binary codec.
 - Zsh scalars can retain NUL; the library preserves it through `\u0000`. External
   process arguments cannot carry NUL.
 - Container nesting is limited to 128. Parsing holds the complete source and a
   byte array in memory. It is intended for shell-sized documents, not streaming
-  large datasets; input size has no separate hard cap.
+  large datasets; input size has no separate hard cap. Successful
+  whole-document operations release the byte array after reaching EOF; the
+  tokenizer is already unusable until the next `zjson_begin`.
 - There is one shared tokenizer state. Calls preserve shell options and locale,
   but replace the documented `ZJSON_*` results. Reserve `ZJSON_*`, `zjson_*`, and
   `_zjson_*` names for the library. `REPLY` follows Zsh's caller-local output
@@ -206,6 +267,7 @@ LC_ALL=C zsh -f tests/run.zsh
 zsh -f -n zjson.zsh
 zsh -f -n lib/zjson.zsh
 zsh -f -n lib/pointer.zsh
+zsh -f -n lib/encode.zsh
 zsh -f tests/matrix.zsh /path/to/zsh-5.8 /path/to/zsh-5.9.2
 zsh -f benchmarks/run.zsh 5
 ```
@@ -214,8 +276,9 @@ The test runner empties `PATH` before loading the library and running every
 assertion. Tests cover valid and malformed syntax, scalar types, nested values,
 control characters, Unicode and malformed UTF-8, exact source capture, nesting
 limits, shell metacharacters, and caller option/alias isolation.
-Pointer examples, diagnostic locations, and deterministic mixed-escape strings
-extend the same dependency-free suite. See [benchmark methodology and results](benchmarks/README.md).
+Pointer examples, generic parsing, multi-Pointer lookup, source-order encoding,
+callbacks, diagnostic locations, and deterministic mixed-escape strings extend
+the same dependency-free suite. See [benchmark methodology and results](benchmarks/README.md).
 The [CI workflow](.github/workflows/test.yml) provisions versioned Zsh
 interpreters and runs the matrix on pushes, pull requests, and releases.
 Provisioning the test interpreters uses the runner's build tools; installing or

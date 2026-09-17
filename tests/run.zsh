@@ -195,6 +195,7 @@ assert_eq '' "$sample" 'loading and library calls do not print'
 source "$TEST_ROOT/tests/utf8.zsh" || exit 1
 source "$TEST_ROOT/tests/diagnostics.zsh" || exit 1
 source "$TEST_ROOT/tests/pointer.zsh" || exit 1
+source "$TEST_ROOT/tests/api.zsh" || exit 1
 source "$TEST_ROOT/tests/scanner.zsh" || exit 1
 source "$TEST_ROOT/tests/utf8_api.zsh" || exit 1
 source "$TEST_ROOT/tests/context.zsh" || exit 1

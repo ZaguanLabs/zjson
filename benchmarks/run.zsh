@@ -12,6 +12,9 @@ source "${ZJSON_BENCH_ROOT:-${0:A:h:h}}/zjson.zsh" || exit 1
 
 bench_raw() { zjson_begin "$1" && zjson_capture_raw_value; }
 bench_compact() { zjson_begin "$1" && zjson_capture_value; }
+bench_each_noop() { return 0; }
+bench_each_object() { zjson_each_object "$1" bench_each_noop; }
+bench_encode_object() { zjson_encode_object; }
 
 bench() {
   emulate -L zsh
@@ -88,6 +91,10 @@ document="{\"data\":[${(j:,:)elements}],\"result\":{\"name\":\"zjson\"}}"
 bench envelope zjson_parse_object "$document" || exit 1
 bench envelope bench_raw "$document" || exit 1
 bench envelope bench_compact "$document" || exit 1
+bench envelope bench_each_object "$document" || exit 1
+bench envelope zjson_get_multi "$document" /result/name /data/999 || exit 1
+zjson_parse_object "$document" || exit 1
+bench envelope bench_encode_object "$document" || exit 1
 if (( $+functions[zjson_get] )); then
   bench envelope zjson_get "$document" /result/name || exit 1
 fi

@@ -34,7 +34,13 @@ _zjson_utf8_valid() {
     if (( ${#probe} == 2 )); then
       [[ $input != *[[:INVALID:][:INCOMPLETE:]]* ]] || return 1
       setopt nomultibyte
-      [[ $input != *[$'\xf5'-$'\xff']* && $input != *$'\xf4'[$'\x90'-$'\xbf']* ]]
+      # Do not trust libc for encodings that Unicode forbids. Some
+      # implementations accept overlong forms, surrogates, or U+10FFFF+.
+      [[ $input != *[$'\xf5'-$'\xff']* &&
+         $input != *$'\xe0'[$'\x80'-$'\x9f']* &&
+         $input != *$'\xed'[$'\xa0'-$'\xbf']* &&
+         $input != *$'\xf0'[$'\x80'-$'\x8f']* &&
+         $input != *$'\xf4'[$'\x90'-$'\xbf']* ]]
       return
     fi
     setopt nomultibyte
