@@ -45,12 +45,18 @@ The callback may itself invoke another context scope.
 
 The scope localizes these variables using Zsh dynamic scope:
 
-- `ZJSON_SOURCE`, `ZJSON_CHARS`, `ZJSON_POS`, `ZJSON_LEN`, `ZJSON_TOKEN_START`;
+- `ZJSON_SOURCE`, `ZJSON_POS`, `ZJSON_LEN`, `ZJSON_TOKEN_START`;
 - `ZJSON_TOKEN_TYPE`, `ZJSON_TOKEN_VALUE`;
 - `ZJSON_ERROR`, `ZJSON_ERROR_CODE`, `ZJSON_ERROR_OFFSET`,
   `ZJSON_ERROR_LINE`, `ZJSON_ERROR_COLUMN`;
 - internal UTF-8 error position and recursion depth. The nested document starts
   with its own full nesting budget.
+
+`ZJSON_CHARS` is not copied on scope entry. The scope records the tokenizer
+generation and the original source text; if a callback calls `zjson_begin`,
+the outer byte array is rebuilt from that source when the callback returns or
+unwinds. Callbacks that do not start another parser therefore avoid an
+O(document-size) array copy.
 
 Locals automatically restore the outer values on normal return, nonzero status,
 and shell-error unwinding. This does not catch errors or prevent a callback from
@@ -71,8 +77,8 @@ variables inside the callback, as in the example above. If decoder outputs also
 need isolation, the caller can declare those public result variables local in
 its own enclosing function.
 
-Copying the outer byte array costs memory and time proportional to its size.
-That cost occurs at explicit context boundaries, with no snapshot work added to
-normal token advancement. A nested whole-document operation may clear its local
-copy of `ZJSON_CHARS` after EOF; scope exit still restores the outer tokenizer's
-byte array. This API is intended for nested synchronous parsing.
+Rebuilding after a nested begin costs time proportional to the outer source
+size. That cost occurs only at explicit context boundaries, with no snapshot
+work added to normal token advancement. A nested whole-document operation may
+clear the global byte array after EOF; scope exit still restores the outer
+tokenizer's byte array. This API is intended for nested synchronous parsing.

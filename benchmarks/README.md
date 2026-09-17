@@ -143,3 +143,35 @@ The full byte-array representation was retained, so no peak-memory column was
 added. Successful whole-document operations now clear `ZJSON_CHARS` at EOF, but
 Zsh has no portable per-operation peak-RSS primitive. Token APIs intentionally
 retain the array until the next `zjson_begin`.
+
+## Post-review performance fixes, 2026-09-17
+
+The zcoder integration review measured two regressions in the initial 0.2.0
+work: extra UTF-8 prefix scans and unconditional byte-array copying for every
+object callback. The fixes use one candidate-leader scan before the exact
+forbidden-prefix checks, and rebuild the outer byte array only after a callback
+calls `zjson_begin`.
+
+The same review workload, Zsh 5.9.2, Linux x86_64, seven samples, C.UTF-8:
+
+| Workload | 0.1.0 median | Initial 0.2.0 review | 0.2.1 |
+| --- | ---: | ---: | ---: |
+| Ollama stream chunk | 0.526–0.532 | 0.480–0.490 | 0.489 |
+| Ollama tool response | 1.507–1.551 | 1.399–1.443 | 1.435 |
+| Quote 16,384 `é` characters | 3.805–3.828 | 4.434–4.997 | 3.747 |
+| Validate the same string | 6.569–6.620 | 7.182–7.231 | 6.487 |
+| Three separate Pointers | not recorded | 4.146–4.324 | 4.223 |
+| One multi-Pointer lookup | unavailable | 1.757–1.812 | 1.815 |
+| Object callbacks, 500 fields | unavailable | 333.548–335.413 | 87.184 |
+| Object decode, 500 fields | 65.791–67.753 | 65.893–66.270 | 63.603 |
+
+The fixed C-locale medians were 9.315 ms for Unicode quoting and 11.852 ms for
+validation, improved from the review's 9.646 ms and 12.527 ms. Callbacks remain
+somewhat slower than direct object decoding because each member still enters an
+explicit context scope; the remaining difference is function and scalar-state
+overhead rather than an array copy. Direct decoding remains the best hot-path
+choice when all members are needed.
+
+The complete distributions are in
+[performance-review.tsv](results/2026-09-17-performance-review.tsv). These are
+local microbenchmarks from the zcoder integration workload, not threshold tests.

@@ -42,6 +42,11 @@ context_runtime_error() {
   local value=$(( 1 / 0 ))
 }
 
+context_begin_runtime_error() {
+  zjson_begin '{"inner":1}' || return 1
+  local value=$(( 1 / 0 ))
+}
+
 () {
   local -a context_state=() expected_state=()
   local application_output=before REPLY=before
@@ -85,6 +90,22 @@ context_runtime_error() {
   assert_eq ',' "$ZJSON_TOKEN_TYPE" 'outer parser can continue'
   zjson_next
   assert_eq 2 "$ZJSON_TOKEN_VALUE" 'outer parser retains its next value'
+
+  context_snapshot
+  expected_state=( "${context_state[@]}" )
+
+  {
+    zjson_with_context context_begin_runtime_error 2>/dev/null
+  } always {
+    if (( TRY_BLOCK_ERROR )); then
+      TRY_BLOCK_ERROR=0
+      application_output=caught-begin
+    fi
+  }
+  assert_eq caught-begin "$application_output" 'test caught runtime error after nested begin'
+  context_assert_restored
+  zjson_next
+  assert_eq ']' "$ZJSON_TOKEN_TYPE" 'outer parser can continue after nested begin error'
 
   zjson_validate $'{\n"bad":01}'
   context_snapshot

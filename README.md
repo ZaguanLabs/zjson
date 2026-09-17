@@ -7,7 +7,7 @@ arrays. No jq, Python, external commands, third-party modules, or build step is
 required. The library uses Zsh builtins and parameter expansion only.
 
 This is the first standalone extraction of the JSON core from
-[`zcoder.zsh`](docs/origin.md), with a new `zjson_` API. Version 0.2.0 is a
+[`zcoder.zsh`](docs/origin.md), with a new `zjson_` API. Version 0.2.1 is a
 development release; the API may evolve. **Zsh 5.8 and newer are supported.**
 The release test matrix runs actual Zsh 5.8 and 5.9.2 on Linux, in both C and
 C.UTF-8 locales, with the correctness suite's command path empty.

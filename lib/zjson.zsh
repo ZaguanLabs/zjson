@@ -2,11 +2,11 @@
 # Extracted and adapted from zcoder.zsh/lib/json.zsh; see docs/origin.md.
 # Internal implementation. Source ../zjson.zsh for option-safe loading.
 
-typeset -g ZJSON_VERSION=0.2.0
+typeset -g ZJSON_VERSION=0.2.1
 typeset -g ZJSON_SOURCE="" ZJSON_TOKEN_TYPE="" ZJSON_TOKEN_VALUE="" ZJSON_ERROR=""
 typeset -ga ZJSON_CHARS=() ZJSON_ARRAY=() ZJSON_ARRAY_TYPES=() ZJSON_OBJECT_KEYS=() ZJSON_OBJECT_DUPLICATE_KEYS=()
 typeset -gA ZJSON_OBJECT=() ZJSON_OBJECT_TYPES=()
-typeset -gi ZJSON_POS=1 ZJSON_LEN=0 ZJSON_TOKEN_START=1
+typeset -gi ZJSON_POS=1 ZJSON_LEN=0 ZJSON_TOKEN_START=1 _zjson_begin_generation=0
 typeset -g ZJSON_ERROR_CODE="" ZJSON_TYPE=""
 typeset -gi ZJSON_ERROR_OFFSET=0 ZJSON_ERROR_LINE=0 ZJSON_ERROR_COLUMN=0
 
@@ -98,6 +98,7 @@ zjson_quote() {
 zjson_begin() {
   emulate -L zsh
   setopt nomultibyte
+  (( ++_zjson_begin_generation ))
   ZJSON_ERROR=""
   ZJSON_ERROR_CODE=""
   ZJSON_ERROR_OFFSET=0 ZJSON_ERROR_LINE=0 ZJSON_ERROR_COLUMN=0
